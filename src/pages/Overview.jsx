@@ -30,7 +30,7 @@ function filterInflowByPeriod(inflow, period) {
   return inflow.filter((r) => r.month === period);
 }
 
-export function OverviewView({ claims, go, setRole, inflow, members, availableFunds }) {
+export function OverviewView({ claims, go, setRole, inflow, members, availableFunds, memberPayments = [] }) {
   const [period, setPeriod] = React.useState('month');
   const [rangeStart, setRangeStart] = React.useState('');
   const [rangeEnd, setRangeEnd]     = React.useState('');
@@ -234,7 +234,10 @@ export function OverviewView({ claims, go, setRole, inflow, members, availableFu
           <SectionTitle kicker="Your desk">Pipeline at a glance</SectionTitle>
           <div className="pipeline-mini">
             {DATA.ROLES.map((r) => {
-              const cnt = open.filter((c) => c.stageIndex === DATA.STAGE_KEYS.indexOf(r.key)).length;
+              const idx = DATA.STAGE_KEYS.indexOf(r.key);
+              const claimCnt = open.filter((c) => c.stageIndex === idx).length;
+              const mpCnt = memberPayments.filter(mp => mp.status === 'open' && mp.stageIndex === idx).length;
+              const cnt = claimCnt + mpCnt;
               return (
                 <button className="pm-row" key={r.key} onClick={() => { setRole(r.key); go('claims'); }}>
                   <Avatar name={r.name} size={30} />
@@ -242,7 +245,7 @@ export function OverviewView({ claims, go, setRole, inflow, members, availableFu
                     <span className="pm-role">{r.label}{r.final && <em className="final-tag">final</em>}</span>
                     <span className="pm-name">{r.name}</span>
                   </div>
-                  <span className={'pm-count' + (cnt ? ' has' : '')}>{cnt}</span>
+                  <span className={'pm-count' + (cnt ? ' has' : '')} title={cnt ? `${claimCnt} claim${claimCnt!==1?'s':''} + ${mpCnt} payment${mpCnt!==1?'s':''}` : ''}>{cnt}</span>
                 </button>
               );
             })}

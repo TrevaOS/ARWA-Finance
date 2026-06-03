@@ -67,6 +67,7 @@ function App() {
   const [notifPanelOpen, setNotifPanelOpen] = React.useState(false);
   const notifRef = React.useRef(null);
   const [portalUsers, setPortalUsers] = React.useState([]);
+  const [memberPayments, setMemberPayments] = React.useState([]);
 
   // Load portal users from Supabase on mount
   React.useEffect(() => {
@@ -319,10 +320,79 @@ function App() {
   };
 
   const onUpdateMemberPayment = (memberId, paymentInfo) => {
-    setMembers((prev) => prev.map((m) => m.id === memberId ? { ...m, paymentSubmitted: true, pendingPayment: paymentInfo } : m));
-    log('member_status', `Member ${memberId} submitted payment — Txn: ${paymentInfo.txnId}`);
-    notify(`Payment submitted by ${members.find(m=>m.id===memberId)?.name} — Txn: ${paymentInfo.txnId}`, 'info', 'rupee');
-    flash('Payment submitted for committee review', 'success', 'check');
+    const member = members.find(m => m.id === memberId);
+    if (!member) return;
+    const mp = {
+      id:         'MP-' + Date.now(),
+      memberId,
+      memberName: member.name,
+      memberFlat: member.flat,
+      type:       member.type,
+      amount:     paymentInfo.amount || (member.type === 'lifetime' ? DATA.CHARGES.lifetime : DATA.CHARGES.annual),
+      txnId:      paymentInfo.txnId,
+      ssUrl:      paymentInfo.ssUrl || null,
+      date:       paymentInfo.date || DATA.TODAY,
+      stageIndex: 0,        // starts at Joint Secretary
+      status:     'open',
+      approvals:  [],
+    };
+    setMemberPayments(prev => [mp, ...prev]);
+    setMembers(prev => prev.map(m => m.id === memberId ? { ...m, paymentSubmitted: true, pendingPaymentId: mp.id } : m));
+    log('member_status', `Member ${memberId} submitted payment ₹${mp.amount} — Txn: ${paymentInfo.txnId} — routed to Joint Secretary`);
+    notify(`Payment from ${member.name} (₹${mp.amount}) — awaiting Joint Secretary approval`, 'info', 'rupee');
+    flash('Payment submitted — pending Joint Secretary approval', 'success', 'rupee');
+  };
+
+  const onApproveMemberPayment = (mpId, note = '') => {
+    let released = 0;
+    const actorName = session?.name || DATA.ROLES[DATA.STAGE_KEYS.indexOf(role)]?.label || role;
+    setMemberPayments(prev => prev.map(mp => {
+      if (mp.id !== mpId) return mp;
+      const approvals = [...mp.approvals, { role, name: actorName, date: DATA.TODAY, note }];
+      if (mp.stageIndex >= DATA.STAGE_KEYS.length - 1) {
+        // Treasurer — final release
+        released = mp.amount;
+        log('inflow_added', `Membership payment MP-${mpId} finally approved by Treasurer — ₹${mp.amount} released`, { amount: mp.amount });
+        return { ...mp, approvals, status: 'disbursed', disbursedDate: DATA.TODAY, stageIndex: mp.stageIndex + 1 };
+      }
+      log('member_status', `MP ${mpId} approved by ${DATA.ROLES[mp.stageIndex]?.label}`);
+      return { ...mp, approvals, stageIndex: mp.stageIndex + 1 };
+    }));
+    if (released > 0) {
+      // Add to inflow and available funds
+      const monthKey = DATA.TODAY.slice(0, 7);
+      setInflow(prev => {
+        const existing = prev.find(r => r.month === monthKey);
+        if (existing) return prev.map(r => r.month === monthKey ? { ...r, annual: (r.annual || 0) + released } : r);
+        const mn = parseInt(DATA.TODAY.slice(5, 7), 10);
+        const MONTHS_SHORT = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+        return [...prev, { month: monthKey, label: MONTHS_SHORT[mn-1], annual: released, lifetime: 0, sponsorship: 0 }];
+      });
+      setAvailableFunds(prev => prev + released);
+      // Mark member as paid
+      const mp = memberPayments.find(m => m.id === mpId);
+      if (mp) setMembers(prev => prev.map(m => m.id === mp.memberId ? { ...m, status: 'paid', renewedDate: DATA.TODAY, paymentSubmitted: false } : m));
+      notify(`₹${released} from membership payment released to funds after Treasurer approval`, 'success', 'rupee');
+      flash(`₹${released} added to available funds`, 'success', 'rupee');
+    } else {
+      const mp = memberPayments.find(m => m.id === mpId);
+      const nextRole = DATA.ROLES[mp ? mp.stageIndex + 1 : 1];
+      notify(`Membership payment approved — forwarded to ${nextRole?.label || 'next approver'}`, 'success', 'check');
+      flash('Approved — forwarded to next approver', 'success', 'check');
+    }
+  };
+
+  const onRejectMemberPayment = (mpId, reason) => {
+    const actorName = session?.name || DATA.ROLES[DATA.STAGE_KEYS.indexOf(role)]?.label || role;
+    setMemberPayments(prev => prev.map(mp => {
+      if (mp.id !== mpId) return mp;
+      log('member_status', `Membership payment ${mpId} rejected by ${actorName} — ${reason}`);
+      return { ...mp, status: 'rejected', rejected: { role, name: actorName, date: DATA.TODAY, reason } };
+    }));
+    const mp = memberPayments.find(m => m.id === mpId);
+    if (mp) setMembers(prev => prev.map(m => m.id === mp.memberId ? { ...m, paymentSubmitted: false, pendingPaymentId: null } : m));
+    notify(`Membership payment rejected by ${actorName} — "${reason}"`, 'danger', 'x');
+    flash('Payment rejected', 'danger', 'x');
   };
 
   // Unique roles — only one person can hold each
@@ -609,7 +679,7 @@ function App() {
 
         <div className="content">
           {view === 'overview' && (
-            <OverviewView claims={claims} go={go} setRole={setRole} inflow={inflow} members={members} availableFunds={availableFunds} />
+            <OverviewView claims={claims} go={go} setRole={setRole} inflow={inflow} members={members} availableFunds={availableFunds} memberPayments={memberPayments} />
           )}
           {view === 'claims' && (
             <ClaimsView
@@ -621,6 +691,9 @@ function App() {
               onNewClaim={onNewClaim} onSponsor={onSponsor}
               onMoveClaimStage={(claimId, stageIdx) => onForceClaimStatus(claimId, 'stage', stageIdx)}
               onVoidClaim={onVoidClaim}
+              memberPayments={memberPayments}
+              onApproveMemberPayment={onApproveMemberPayment}
+              onRejectMemberPayment={onRejectMemberPayment}
               currentUser={session}
             />
           )}
@@ -632,6 +705,7 @@ function App() {
               onUpdateMemberStatus={onUpdateMemberStatus}
               onUpdateMemberRole={onUpdateMemberRole}
               onUpdateMemberPayment={onUpdateMemberPayment}
+              memberPayments={memberPayments}
               onExportMembersPdf={() => setOpenExportDialog('members')}
             />
           )}

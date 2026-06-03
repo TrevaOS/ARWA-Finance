@@ -32,7 +32,7 @@ function EndDateCell({ member }) {
 const UNIQUE_ROLES_LIST = ['President', 'Vice President', 'Secretary', 'Joint Secretary', 'Treasurer'];
 const ALL_ROLES_LIST = [...UNIQUE_ROLES_LIST, 'Member'];
 
-export function MembersView({ members, onAddMember, onUpdateMemberStatus, onExportMembersPdf, role, onUpdateMemberRole, onUpdateMemberPayment }) {
+export function MembersView({ members, onAddMember, onUpdateMemberStatus, onExportMembersPdf, role, onUpdateMemberRole, onUpdateMemberPayment, memberPayments = [] }) {
   const [showOnboard, setShowOnboard] = React.useState(false);
   const [screen, setScreen] = React.useState('all');
   const [filterType, setFilterType] = React.useState('all');
@@ -204,6 +204,7 @@ export function MembersView({ members, onAddMember, onUpdateMemberStatus, onExpo
       {detailMember && (
         <MemberDetailModal
           member={members.find(m => m.id === detailMember.id) || detailMember}
+          pendingPayment={memberPayments.find(mp => mp.memberId === detailMember.id && mp.status === 'open')}
           canApprove={canAddMember}
           onClose={() => setDetailMember(null)}
           onUpdateStatus={onUpdateMemberStatus}
@@ -276,7 +277,9 @@ const UPI_VPA = 'attigupperwa@upi';
 const ANNUAL_AMT = 500;
 const LIFETIME_AMT = 5000;
 
-function MemberDetailModal({ member, canApprove, onClose, onUpdateStatus, onUpdatePayment }) {
+const STAGE_LABELS = ['Joint Secretary', 'Secretary', 'Vice President', 'President', 'Treasurer'];
+
+function MemberDetailModal({ member, pendingPayment, canApprove, onClose, onUpdateStatus, onUpdatePayment }) {
   const [txnId, setTxnId]     = React.useState('');
   const [ssFile, setSsFile]   = React.useState(null);
   const [ssUrl, setSsUrl]     = React.useState(null);
@@ -339,8 +342,30 @@ function MemberDetailModal({ member, canApprove, onClose, onUpdateStatus, onUpda
             )}
           </div>
 
-          {/* Payment section */}
-          {!isPaid && !submitted && (
+          {/* Pipeline status — payment is in workflow */}
+          {!isPaid && pendingPayment && (
+            <div style={{ background: 'var(--amber-bg)', border: '1px solid #e8c96a', borderRadius: 12, padding: 14, display: 'flex', gap: 10, alignItems: 'center' }}>
+              <Icon name="clock" size={16} style={{ color: 'var(--amber)', flexShrink: 0 }} />
+              <div>
+                <div style={{ fontWeight: 700, fontSize: 13.5, color: 'var(--amber)' }}>Payment under review</div>
+                <div style={{ fontSize: 12, color: 'var(--ink-3)', marginTop: 2 }}>
+                  Txn {pendingPayment.txnId} · Awaiting <b>{STAGE_LABELS[pendingPayment.stageIndex] || 'approval'}</b>
+                  {pendingPayment.approvals?.length > 0 && ` · ${pendingPayment.approvals.length} of 5 approved`}
+                </div>
+                <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
+                  {STAGE_LABELS.map((lbl, i) => (
+                    <div key={i} style={{
+                      width: 28, height: 6, borderRadius: 3,
+                      background: i < (pendingPayment.approvals?.length || 0) ? 'var(--green)' : i === pendingPayment.stageIndex ? 'var(--amber)' : 'var(--line-2)'
+                    }} />
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Payment section — only show if no pending workflow item */}
+          {!isPaid && !submitted && !pendingPayment && (
             <div style={{ background: 'var(--paper)', border: '1px solid var(--line)', borderRadius: 14, padding: 18 }}>
               <div className="kicker" style={{ marginBottom: 10 }}>Pay membership fee</div>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 18, alignItems: 'start' }}>
@@ -429,12 +454,11 @@ function MemberDetailModal({ member, canApprove, onClose, onUpdateStatus, onUpda
             </div>
           )}
 
-          {/* Admin approve/reject strip */}
-          {canApprove && !isPaid && (member.status === 'pending' || member.paymentSubmitted) && (
-            <div style={{ display: 'flex', gap: 10, alignItems: 'center', paddingTop: 4 }}>
-              <span style={{ fontSize: 13, color: 'var(--ink-3)', marginRight: 'auto' }}>Committee action:</span>
-              <Button size="sm" variant="primary" icon="check" onClick={() => { onUpdateStatus(member.id, 'paid'); onClose(); }}>Mark paid</Button>
-              <Button size="sm" variant="soft-danger" icon="x" onClick={() => { onUpdateStatus(member.id, 'due'); onClose(); }}>Mark due</Button>
+          {/* Note: approvals happen in Claims → Pending Approvals tab */}
+          {!isPaid && !pendingPayment && !submitted && (
+            <div style={{ fontSize: 12, color: 'var(--ink-3)', display: 'flex', gap: 6, alignItems: 'center' }}>
+              <Icon name="info" size={13} style={{ flexShrink: 0 }} />
+              After submitting, payment goes through the approval pipeline (JS → Secretary → VP → President → Treasurer) before funds are released.
             </div>
           )}
         </div>

@@ -17,16 +17,24 @@ function claimDaysOpen(claim) {
   return Math.floor((today - raised) / 86400000);
 }
 
-export function ClaimsView({ claims, role, onApprove, onReject, openId, setOpenId, openNew, setOpenNew, openSponsor, setOpenSponsor, onNewClaim, onSponsor, onMoveClaimStage, onVoidClaim, currentUser }) {
+export function ClaimsView({ claims, role, onApprove, onReject, openId, setOpenId, openNew, setOpenNew, openSponsor, setOpenSponsor, onNewClaim, onSponsor, onMoveClaimStage, onVoidClaim, currentUser, memberPayments = [], onApproveMemberPayment, onRejectMemberPayment }) {
   const roleMeta = DATA.ROLES.find((r) => r.key === role) || DATA.ROLES[0];
   const displayName = currentUser?.name || roleMeta.label;
   const roleIdx = DATA.STAGE_KEYS.indexOf(role);
   const [tab, setTab] = React.useState('all');
+  const [mpTab, setMpTab] = React.useState('pending');
+  const [mainTab, setMainTab] = React.useState('claims'); // 'claims' | 'payments'
   const [viewMode, setViewMode] = React.useState('list');
   const [filterCat, setFilterCat] = React.useState('all');
   const [filterStatus, setFilterStatus] = React.useState('all');
   const [catMenuOpen, setCatMenuOpen] = React.useState(false);
+  const [rejectMpId, setRejectMpId] = React.useState(null);
+  const [rejectReason, setRejectReason] = React.useState('');
   const catMenuRef = React.useRef(null);
+
+  const mpMine = memberPayments.filter(mp => mp.status === 'open' && mp.stageIndex === roleIdx);
+  const mpAllOpen = memberPayments.filter(mp => mp.status === 'open');
+  const mpResolved = memberPayments.filter(mp => mp.status !== 'open');
 
   React.useEffect(() => {
     const handler = (e) => { if (catMenuRef.current && !catMenuRef.current.contains(e.target)) setCatMenuOpen(false); };
@@ -53,7 +61,7 @@ export function ClaimsView({ claims, role, onApprove, onReject, openId, setOpenI
           <div className="rb-avatar"><Icon name="user" size={22} /></div>
           <div>
             <div className="rb-role">Reviewing as <b>{roleMeta.label}</b>{roleMeta.final && <span className="final-tag">final approver</span>}</div>
-            <div className="rb-name">{displayName} &middot; {mine.length} item{mine.length !== 1 ? 's' : ''} awaiting your action</div>
+            <div className="rb-name">{displayName} &middot; {mine.length + mpMine.length} item{(mine.length + mpMine.length) !== 1 ? 's' : ''} awaiting your action</div>
           </div>
         </div>
         <div className="rb-actions">
@@ -61,6 +69,123 @@ export function ClaimsView({ claims, role, onApprove, onReject, openId, setOpenI
           <Button variant="primary" icon="plus" onClick={() => setOpenNew(true)}>New claim</Button>
         </div>
       </div>
+
+      {/* Main tab: Claims vs Membership Payments */}
+      <div style={{ display: 'flex', gap: 4, borderBottom: '2px solid var(--line)', marginBottom: -2 }}>
+        <button className={'tab' + (mainTab === 'claims' ? ' on' : '')} onClick={() => setMainTab('claims')} style={{ paddingBottom: 10 }}>
+          Expense Claims<span className="tab-count">{open.length}</span>
+        </button>
+        <button className={'tab' + (mainTab === 'payments' ? ' on' : '')} onClick={() => setMainTab('payments')} style={{ paddingBottom: 10 }}>
+          Membership Payments{(mpMine.length > 0) && <span className="tab-count" style={{ background: 'var(--terra)', color: '#fff' }}>{mpMine.length}</span>}{mpMine.length === 0 && <span className="tab-count">{mpAllOpen.length}</span>}
+        </button>
+      </div>
+
+      {/* ── MEMBERSHIP PAYMENTS PANEL ── */}
+      {mainTab === 'payments' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <div className="tabs" style={{ borderBottom: 'none' }}>
+            <button className={'tab' + (mpTab === 'pending' ? ' on' : '')} onClick={() => setMpTab('pending')}>
+              Needs my action<span className="tab-count">{mpMine.length}</span>
+            </button>
+            <button className={'tab' + (mpTab === 'all' ? ' on' : '')} onClick={() => setMpTab('all')}>
+              All pending<span className="tab-count">{mpAllOpen.length}</span>
+            </button>
+            <button className={'tab' + (mpTab === 'resolved' ? ' on' : '')} onClick={() => setMpTab('resolved')}>
+              Resolved<span className="tab-count">{mpResolved.length}</span>
+            </button>
+          </div>
+
+          {(mpTab === 'pending' ? mpMine : mpTab === 'all' ? mpAllOpen : mpResolved).length === 0 ? (
+            <div className="empty" style={{ padding: '40px 0' }}>
+              <span className="empty-ico"><Icon name="rupee" size={22} /></span>
+              <div className="empty-title">{mpTab === 'pending' ? 'No payments awaiting your action' : 'No membership payments'}</div>
+            </div>
+          ) : (mpTab === 'pending' ? mpMine : mpTab === 'all' ? mpAllOpen : mpResolved).map(mp => {
+            const stageLabel = DATA.ROLES[mp.stageIndex]?.label || 'Unknown';
+            const isRejected = mp.status === 'rejected';
+            const isDisbursed = mp.status === 'disbursed';
+            const canAct = mp.status === 'open' && mp.stageIndex === roleIdx;
+            return (
+              <div key={mp.id} className="claim-card" style={{ border: canAct ? '1.5px solid var(--green-l)' : undefined }}>
+                <div className="cc-main" style={{ cursor: 'default' }}>
+                  <div className="cc-cat" style={{ background: 'var(--green-bg)', color: 'var(--green)' }}>
+                    <Icon name="rupee" size={20} />
+                  </div>
+                  <div className="cc-body">
+                    <div className="cc-top">
+                      <span className="cc-id">{mp.id}</span>
+                      <span className="cc-type" style={{ background: mp.type === 'lifetime' ? 'var(--gold-bg)' : 'var(--green-bg)', color: mp.type === 'lifetime' ? 'var(--gold)' : 'var(--green)' }}>
+                        {mp.type === 'lifetime' ? 'Lifetime' : 'Annual'}
+                      </span>
+                      {isDisbursed && <Badge tone="success">Released to funds</Badge>}
+                      {isRejected && <Badge tone="danger">Rejected</Badge>}
+                      {!isDisbursed && !isRejected && <Badge tone="amber">Awaiting {stageLabel}</Badge>}
+                    </div>
+                    <h4 className="cc-title" style={{ fontSize: 15 }}>{mp.memberName} — Membership Payment</h4>
+                    <div className="cc-meta">
+                      <span>Flat {mp.memberFlat}</span>
+                      <i>·</i><span>Txn: {mp.txnId}</span>
+                      <i>·</i><span>{mp.date}</span>
+                      {mp.approvals?.length > 0 && <><i>·</i><span>{mp.approvals.length}/5 approved</span></>}
+                    </div>
+                    {/* Approval progress bar */}
+                    <div style={{ display: 'flex', gap: 5, marginTop: 8, alignItems: 'center' }}>
+                      {DATA.ROLES.map((r, i) => (
+                        <div key={r.key} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, flex: 1 }}>
+                          <div style={{
+                            height: 5, width: '100%', borderRadius: 3,
+                            background: mp.approvals?.length > i ? 'var(--green)' : i === mp.stageIndex && mp.status === 'open' ? 'var(--amber)' : 'var(--line-2)'
+                          }} />
+                          <span style={{ fontSize: 9.5, color: 'var(--ink-3)', whiteSpace: 'nowrap' }}>{r.short}</span>
+                        </div>
+                      ))}
+                    </div>
+                    {isRejected && mp.rejected && (
+                      <div style={{ fontSize: 12, color: 'var(--danger)', marginTop: 6, background: 'var(--danger-bg)', borderRadius: 7, padding: '5px 9px' }}>
+                        Rejected by {mp.rejected.name} ({mp.rejected.role}) — "{mp.rejected.reason}"
+                      </div>
+                    )}
+                    {isDisbursed && (
+                      <div style={{ fontSize: 12, color: 'var(--success)', marginTop: 6 }}>
+                        ₹{mp.amount.toLocaleString('en-IN')} released to available funds on {mp.disbursedDate}
+                      </div>
+                    )}
+                  </div>
+                  <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                    <div className="cc-amt">₹{mp.amount.toLocaleString('en-IN')}</div>
+                  </div>
+                </div>
+                {canAct && (
+                  <div className="cc-foot">
+                    <div style={{ fontSize: 13, color: 'var(--ink-3)' }}>
+                      {roleMeta.final ? 'Final release — funds will be added upon approval' : `Approve to forward to ${DATA.ROLES[mp.stageIndex + 1]?.label || 'next'}`}
+                    </div>
+                    <div className="cc-actions">
+                      {rejectMpId === mp.id ? (
+                        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                          <TextInput value={rejectReason} onChange={e => setRejectReason(e.target.value)} placeholder="Reason for rejection" style={{ fontSize: 13, padding: '6px 10px', width: 220 }} />
+                          <Button size="sm" variant="danger" disabled={!rejectReason.trim()} onClick={() => { onRejectMemberPayment(mp.id, rejectReason); setRejectMpId(null); setRejectReason(''); }}>Confirm reject</Button>
+                          <Button size="sm" variant="ghost" onClick={() => { setRejectMpId(null); setRejectReason(''); }}>Cancel</Button>
+                        </div>
+                      ) : (
+                        <>
+                          <Button size="sm" variant="soft-danger" icon="x" onClick={() => setRejectMpId(mp.id)}>Reject</Button>
+                          <Button size="sm" variant="primary" icon="check" onClick={() => onApproveMemberPayment(mp.id)}>
+                            {roleMeta.final ? 'Release funds' : 'Approve'}
+                          </Button>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* ── CLAIMS PANEL (only when mainTab === 'claims') ── */}
+      {mainTab === 'claims' && <>
 
       <div className="claims-toolbar">
         <div className="tabs" style={{ borderBottom: 'none', flex: 1 }}>
@@ -159,6 +284,7 @@ export function ClaimsView({ claims, role, onApprove, onReject, openId, setOpenI
 
       <NewClaimForm open={openNew} onClose={() => setOpenNew(false)} onSubmit={onNewClaim} />
       <SponsorForm open={openSponsor} onClose={() => setOpenSponsor(false)} onSubmit={onSponsor} />
+      </> /* end mainTab === 'claims' fragment */}
     </div>
   );
 }
