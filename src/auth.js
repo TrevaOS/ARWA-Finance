@@ -1,4 +1,4 @@
-import { supabase } from './supabase.js';
+import { supabase, supabaseAdmin } from './supabase.js';
 
 // ============================================================
 // TREVA SUPER-ADMIN (hardcoded, never stored in Supabase)
@@ -44,10 +44,11 @@ export async function logoutAsync() {
 }
 
 // ============================================================
-// PORTAL USERS — read from Supabase
+// PORTAL USERS — read from Supabase (admin client bypasses RLS)
 // ============================================================
 export async function loadPortalUsersAsync() {
-  const { data, error } = await supabase
+  const client = supabaseAdmin || supabase;
+  const { data, error } = await client
     .from('users')
     .select('id, name, email, role, member_id');
   if (error) { console.error('loadPortalUsers:', error); return []; }
@@ -61,59 +62,86 @@ export async function loadPortalUsersAsync() {
 }
 
 // ============================================================
-// CREATE USER — via Edge Function (uses service role key server-side)
+// CREATE USER — uses service role key to skip email confirmation
 // ============================================================
 export async function createSupabaseUser(user) {
-  const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-  const secret      = import.meta.env.VITE_FUNCTION_SECRET;
+  if (!supabaseAdmin) {
+    return { ok: false, error: new Error('Service key not configured — add VITE_SUPABASE_SERVICE_KEY') };
+  }
 
-  const res = await fetch(`${supabaseUrl}/functions/v1/create-user`, {
-    method:  'POST',
-    headers: {
-      'Content-Type':  'application/json',
-      'Authorization': `Bearer ${secret}`,
-    },
-    body: JSON.stringify({
-      name:     user.name,
-      email:    user.email,
-      password: user.pass,
-      role:     user.role,
-      memberId: user.memberId || '',
-    }),
+  // 1. Create auth user (email_confirm: true skips the confirmation email)
+  const { data, error: authErr } = await supabaseAdmin.auth.admin.createUser({
+    email:         user.email,
+    password:      user.pass,
+    email_confirm: true,
   });
+  if (authErr) return { ok: false, error: authErr };
 
-  const json = await res.json();
-  if (!res.ok || json.error) return { ok: false, error: new Error(json.error || 'Failed') };
-  return { ok: true, id: json.id };
+  const uid = data.user?.id;
+  if (!uid) return { ok: false, error: new Error('No user ID returned') };
+
+  // 2. Insert profile row
+  const { error: dbErr } = await supabaseAdmin.from('users').insert({
+    id:        uid,
+    name:      user.name,
+    email:     user.email,
+    role:      user.role,
+    member_id: user.memberId || null,
+  });
+  if (dbErr) {
+    await supabaseAdmin.auth.admin.deleteUser(uid);
+    return { ok: false, error: dbErr };
+  }
+
+  return { ok: true, id: uid };
 }
 
 // ============================================================
-// REMOVE USER — delete from users table (auth user stays but
-// cannot log in without a profile row)
+// REMOVE USER — deletes auth user + profile row
 // ============================================================
 export async function removeSupabaseUser(email) {
-  const { error } = await supabase
-    .from('users')
-    .delete()
-    .eq('email', email);
-  if (error) console.error('removeSupabaseUser:', error);
-  return { ok: !error };
+  const client = supabaseAdmin || supabase;
+
+  // Find the user ID first
+  const { data: users } = await client.from('users').select('id').eq('email', email).single();
+  const uid = users?.id;
+
+  // Delete profile row
+  await client.from('users').delete().eq('email', email);
+
+  // Delete auth user if we have admin access
+  if (uid && supabaseAdmin) {
+    await supabaseAdmin.auth.admin.deleteUser(uid);
+  }
+
+  return { ok: true };
 }
 
 // ============================================================
 // UPDATE ROLE
 // ============================================================
 export async function updateSupabaseUserRole(email, newRole) {
-  const { error } = await supabase
-    .from('users')
-    .update({ role: newRole })
-    .eq('email', email);
+  const client = supabaseAdmin || supabase;
+  const { error } = await client.from('users').update({ role: newRole }).eq('email', email);
   if (error) console.error('updateSupabaseUserRole:', error);
   return { ok: !error };
 }
 
 // ============================================================
-// SESSION — sessionStorage
+// MEMBER ID LOGIN
+// ============================================================
+export async function loginByMemberId(memberId, password) {
+  const { data, error } = await supabase
+    .from('users')
+    .select('email')
+    .eq('member_id', memberId.trim())
+    .single();
+  if (error || !data?.email) return null;
+  return loginByEmailAsync(data.email, password);
+}
+
+// ============================================================
+// SESSION
 // ============================================================
 const SESSION_KEY = 'attigupperwa_session';
 
@@ -132,20 +160,7 @@ export function clearSession() {
   sessionStorage.removeItem(SESSION_KEY);
 }
 
-// ============================================================
-// MEMBER ID LOGIN — look up email from users table, then sign in
-// ============================================================
-export async function loginByMemberId(memberId, password) {
-  const { data, error } = await supabase
-    .from('users')
-    .select('email')
-    .eq('member_id', memberId.trim())
-    .single();
-  if (error || !data?.email) return null;
-  return loginByEmailAsync(data.email, password);
-}
-
-// Legacy no-ops kept so any stray imports don't break at runtime
+// Legacy no-ops
 export function loadPortalUsers() { return []; }
 export function getPortalUsers()  { return []; }
 export function addPortalUser()   {}

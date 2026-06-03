@@ -1,14 +1,15 @@
 import { createClient } from '@supabase/supabase-js';
 
-const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
-const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+const SUPABASE_URL  = import.meta.env.VITE_SUPABASE_URL;
+const SUPABASE_ANON = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+const SUPABASE_SVC  = import.meta.env.VITE_SUPABASE_SERVICE_KEY;
 
-if (!SUPABASE_URL || !SUPABASE_KEY) {
-  console.warn('Supabase env vars missing — running in offline/localStorage mode');
-}
+export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON);
 
-export const supabase = (SUPABASE_URL && SUPABASE_KEY)
-  ? createClient(SUPABASE_URL, SUPABASE_KEY)
+// Admin client — only used for user creation by Treva super-admin.
+// Uses the service role key which bypasses RLS and email confirmation.
+export const supabaseAdmin = SUPABASE_SVC
+  ? createClient(SUPABASE_URL, SUPABASE_SVC, {
+      auth: { autoRefreshToken: false, persistSession: false },
+    })
   : null;
-
-export const isSupabaseReady = !!supabase;
