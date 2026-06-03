@@ -23,7 +23,7 @@ export function LoginPage({ onLogin }) {
       if (mode === 'email') {
         user = await loginByEmailAsync(email.trim(), pass);
       } else {
-        user = loginByMemberId(memberId.trim(), pass);
+        user = await loginByMemberId(memberId.trim(), pass);
       }
       if (!user) { setError('Invalid credentials. Please check and try again.'); return; }
       saveSession(user);

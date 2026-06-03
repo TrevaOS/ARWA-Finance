@@ -132,6 +132,19 @@ export function clearSession() {
   sessionStorage.removeItem(SESSION_KEY);
 }
 
+// ============================================================
+// MEMBER ID LOGIN — look up email from users table, then sign in
+// ============================================================
+export async function loginByMemberId(memberId, password) {
+  const { data, error } = await supabase
+    .from('users')
+    .select('email')
+    .eq('member_id', memberId.trim())
+    .single();
+  if (error || !data?.email) return null;
+  return loginByEmailAsync(data.email, password);
+}
+
 // Legacy no-ops kept so any stray imports don't break at runtime
 export function loadPortalUsers() { return []; }
 export function getPortalUsers()  { return []; }
