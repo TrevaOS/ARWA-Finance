@@ -275,6 +275,36 @@ export function Field({ label, children, hint, required }) {
 }
 
 export function TextInput(props) { return <input className="input" {...props} />; }
+
+export function PasswordInput({ value, onChange, placeholder, ...rest }) {
+  const [show, setShow] = React.useState(false);
+  return (
+    <div style={{ position: 'relative' }}>
+      <input
+        className="input"
+        type={show ? 'text' : 'password'}
+        value={value}
+        onChange={onChange}
+        placeholder={placeholder}
+        style={{ paddingRight: 40 }}
+        {...rest}
+      />
+      <button
+        type="button"
+        onClick={() => setShow(s => !s)}
+        style={{
+          position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)',
+          background: 'none', border: 'none', cursor: 'pointer', padding: 0,
+          color: 'var(--ink-3)', display: 'grid', placeItems: 'center',
+        }}
+        tabIndex={-1}
+        aria-label={show ? 'Hide password' : 'Show password'}
+      >
+        <Icon name={show ? 'eyeoff' : 'eye'} size={17} />
+      </button>
+    </div>
+  );
+}
 export function TextArea(props) { return <textarea className="input textarea" {...props} />; }
 export function Select({ children, ...rest }) {
   return (

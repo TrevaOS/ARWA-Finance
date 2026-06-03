@@ -1,6 +1,6 @@
 import React from 'react';
 import { DATA, CAT_COLORS } from '../data.js';
-import { Icon, Card, Button, Badge, SectionTitle, StatCard, Modal, Field, TextInput, TextArea, Select, FileDrop, Segmented, fmtDate, fmtShortDate, Avatar, claimTone, claimStatusLabel, Stepper } from '../ui/components.jsx';
+import { Icon, Card, Button, Badge, SectionTitle, StatCard, Modal, Field, TextInput, PasswordInput, TextArea, Select, FileDrop, Segmented, fmtDate, fmtShortDate, Avatar, claimTone, claimStatusLabel, Stepper } from '../ui/components.jsx';
 
 const MONTHS_LIST = ['January','February','March','April','May','June','July','August','September','October','November','December'];
 
@@ -797,11 +797,14 @@ function UserManagement({ portalUsers, onAddPortalUser, onRemovePortalUser, onUp
   const [form, setForm] = React.useState(blank);
   const [showForm, setShowForm] = React.useState(false);
   const [confirmRemove, setConfirmRemove] = React.useState(null);
+  const [creating, setCreating] = React.useState(false);
   const set = (k, v) => setForm(p => ({ ...p, [k]: v }));
   const valid = form.name.trim() && form.email.trim() && form.pass.trim().length >= 6 && form.role;
 
-  const handleAdd = () => {
-    onAddPortalUser({ ...form, name: form.name.trim(), email: form.email.trim().toLowerCase() });
+  const handleAdd = async () => {
+    setCreating(true);
+    await onAddPortalUser({ ...form, name: form.name.trim(), email: form.email.trim().toLowerCase() });
+    setCreating(false);
     setForm(blank);
     setShowForm(false);
   };
@@ -834,7 +837,7 @@ function UserManagement({ portalUsers, onAddPortalUser, onRemovePortalUser, onUp
             </div>
             <div className="form-2">
               <Field label="Password" required hint="Min 6 characters">
-                <TextInput type="password" value={form.pass} onChange={e => set('pass', e.target.value)} placeholder="Set a password" />
+                <PasswordInput value={form.pass} onChange={e => set('pass', e.target.value)} placeholder="Set a password" />
               </Field>
               <Field label="Portal role" required>
                 <Select value={form.role} onChange={e => set('role', e.target.value)}>
@@ -847,7 +850,7 @@ function UserManagement({ portalUsers, onAddPortalUser, onRemovePortalUser, onUp
             </Field>
             <div style={{ display: 'flex', gap: 8 }}>
               <Button variant="ghost" onClick={() => { setShowForm(false); setForm(blank); }}>Cancel</Button>
-              <Button variant="primary" icon="check" disabled={!valid} onClick={handleAdd}>Create user</Button>
+              <Button variant="primary" icon="check" disabled={!valid || creating} onClick={handleAdd}>{creating ? 'Creating…' : 'Create user'}</Button>
             </div>
             {form.pass && form.pass.length < 6 && <div style={{ fontSize: 12, color: 'var(--danger)' }}>Password must be at least 6 characters.</div>}
           </div>
@@ -901,7 +904,7 @@ function UserManagement({ portalUsers, onAddPortalUser, onRemovePortalUser, onUp
       <div style={{ background: 'var(--amber-bg)', border: '1px solid #e8c96a', borderRadius: 12, padding: '12px 16px', display: 'flex', gap: 10, alignItems: 'flex-start' }}>
         <Icon name="info" size={16} style={{ color: 'var(--amber)', flexShrink: 0, marginTop: 1 }} />
         <div style={{ fontSize: 13, color: 'var(--ink-2)', lineHeight: 1.55 }}>
-          <b>User access rules:</b> Credentials are stored locally in this browser. To use Supabase Auth for production, connect via the Supabase SQL schema provided earlier. Each user's role determines what sections they can access.
+          <b>User access rules:</b> Accounts are managed via Supabase Auth. Each user's role determines what sections they can access.
           <br/>Role caps: only 1 President, 1 Vice President, 1 Secretary, 1 Joint Secretary, 1 Treasurer — unlimited Members.
         </div>
       </div>

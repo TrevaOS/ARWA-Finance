@@ -12,7 +12,7 @@ import { SponsorshipsView } from './pages/Sponsorships.jsx';
 import { LoginPage } from './pages/Login.jsx';
 import { Icon, Avatar, Button, Toast, Field } from './ui/components.jsx';
 import { exportLedgerPdf, exportMembersPdf } from './utils/pdf.js';
-import { loadSession, saveSession, clearSession, loadPortalUsers, addPortalUser, removePortalUser, getPortalUsers } from './auth.js';
+import { loadSession, saveSession, clearSession, loadPortalUsersAsync, createSupabaseUser, removeSupabaseUser, updateSupabaseUserRole } from './auth.js';
 import logoSrc from './assets/logo.png';
 
 const NAV = [
@@ -66,33 +66,39 @@ function App() {
   const [notifications, setNotifications] = React.useState([]);
   const [notifPanelOpen, setNotifPanelOpen] = React.useState(false);
   const notifRef = React.useRef(null);
-  const [portalUsers, setPortalUsers] = React.useState(() => loadPortalUsers());
+  const [portalUsers, setPortalUsers] = React.useState([]);
 
-  // Reload portal users from localStorage on mount
-  React.useEffect(() => { setPortalUsers(loadPortalUsers()); }, []);
+  // Load portal users from Supabase on mount
+  React.useEffect(() => {
+    loadPortalUsersAsync().then(users => setPortalUsers(users));
+  }, []);
 
-  const onAddPortalUser = (user) => {
-    addPortalUser(user);
-    setPortalUsers([...getPortalUsers()]);
+  const onAddPortalUser = async (user) => {
+    const result = await createSupabaseUser(user);
+    if (!result.ok) {
+      flash(`Failed to create user: ${result.error?.message || 'Unknown error'}`, 'danger', 'x');
+      return;
+    }
+    const fresh = await loadPortalUsersAsync();
+    setPortalUsers(fresh);
     log('member_added', `Portal user created: ${user.name} (${user.email}) — role: ${user.role}`);
     notify(`New user created: ${user.name} (${user.email}) with role ${user.role}`, 'success', 'user');
     flash(`${user.name} added as ${user.role}`, 'success', 'user');
   };
 
-  const onRemovePortalUser = (email) => {
-    const u = getPortalUsers().find(u => u.email === email);
-    removePortalUser(email);
-    setPortalUsers([...getPortalUsers()]);
+  const onRemovePortalUser = async (email) => {
+    const result = await removeSupabaseUser(email);
+    if (!result.ok) { flash('Failed to remove user', 'danger', 'x'); return; }
+    setPortalUsers(prev => prev.filter(u => u.email !== email));
     log('member_status', `Portal user removed: ${email}`);
     notify(`User removed: ${email}`, 'warning', 'x');
-    flash(`User removed`, 'danger', 'x');
+    flash('User removed', 'danger', 'x');
   };
 
-  const onUpdatePortalUserRole = (email, newRole) => {
-    const users = getPortalUsers();
-    const updated = users.map(u => u.email === email ? { ...u, role: newRole } : u);
-    updated.forEach(u => addPortalUser(u));
-    setPortalUsers([...getPortalUsers()]);
+  const onUpdatePortalUserRole = async (email, newRole) => {
+    const result = await updateSupabaseUserRole(email, newRole);
+    if (!result.ok) { flash('Failed to update role', 'danger', 'x'); return; }
+    setPortalUsers(prev => prev.map(u => u.email === email ? { ...u, role: newRole } : u));
     log('member_status', `Portal user ${email} role changed to ${newRole}`);
     notify(`User ${email} role updated to ${newRole}`, 'info', 'edit');
     flash(`Role updated to ${newRole}`, 'success', 'check');

@@ -1,130 +1,119 @@
-// Auth — uses Supabase Auth when configured, falls back to localStorage for local dev.
-import { supabase, isSupabaseReady } from './supabase.js';
+import { supabase } from './supabase.js';
 
 // ============================================================
-// TREVA SUPER-ADMIN (hardcoded fallback, never stored in DB)
+// TREVA SUPER-ADMIN (hardcoded, never stored in Supabase)
 // ============================================================
 const TREVA_EMAIL = (import.meta.env.VITE_TREVA_EMAIL || 'tech@treva.in').toLowerCase();
 const TREVA_PASS  =  import.meta.env.VITE_TREVA_PASS  || 'treva@superadmin2026';
 const TREVA_NAME  =  import.meta.env.VITE_TREVA_NAME  || 'Treva Admin';
 
 // ============================================================
-// LOCAL USER STORE (used when Supabase is not connected)
-// ============================================================
-let LOCAL_USERS = [];
-
-function persistLocalUsers() {
-  try { localStorage.setItem('attigupperwa_users', JSON.stringify(LOCAL_USERS)); } catch {}
-}
-
-export function loadPortalUsers() {
-  try {
-    const raw = localStorage.getItem('attigupperwa_users');
-    if (raw) LOCAL_USERS = JSON.parse(raw);
-  } catch {}
-  return LOCAL_USERS;
-}
-
-export function getPortalUsers() {
-  return LOCAL_USERS;
-}
-
-export function addPortalUser(user) {
-  LOCAL_USERS = LOCAL_USERS.filter(u => u.email.toLowerCase() !== user.email.toLowerCase());
-  LOCAL_USERS.push(user);
-  persistLocalUsers();
-}
-
-export function removePortalUser(email) {
-  LOCAL_USERS = LOCAL_USERS.filter(u => u.email.toLowerCase() !== email.toLowerCase());
-  persistLocalUsers();
-}
-
-// ============================================================
-// LOGIN — Supabase Auth first, then local fallback
+// LOGIN
 // ============================================================
 export async function loginByEmailAsync(email, password) {
   const e = email.toLowerCase().trim();
 
-  // Treva super-admin — never goes through Supabase
   if (e === TREVA_EMAIL && password === TREVA_PASS) {
     return { name: TREVA_NAME, email: TREVA_EMAIL, role: 'superadmin', memberId: '' };
   }
 
-  if (isSupabaseReady) {
-    const { data, error } = await supabase.auth.signInWithPassword({ email: e, password });
-    if (error) return null;
-    // Fetch role from users table
-    const { data: profile } = await supabase
-      .from('users')
-      .select('name, role, member_id')
-      .eq('id', data.user.id)
-      .single();
-    if (!profile) return null;
-    return {
-      id:       data.user.id,
-      name:     profile.name,
-      email:    e,
-      role:     profile.role,
-      memberId: profile.member_id || '',
-    };
-  }
+  const { data, error } = await supabase.auth.signInWithPassword({ email: e, password });
+  if (error) return null;
 
-  // Local fallback
-  const u = LOCAL_USERS.find(u => u.email.toLowerCase() === e && u.pass === password);
-  return u ? { name: u.name, email: u.email, role: u.role, memberId: u.memberId || '' } : null;
-}
+  const { data: profile } = await supabase
+    .from('users')
+    .select('name, role, member_id')
+    .eq('id', data.user.id)
+    .single();
 
-// Synchronous version for legacy callers (local-only, no Supabase)
-export function loginByEmail(email, password) {
-  const e = email.toLowerCase().trim();
-  if (e === TREVA_EMAIL && password === TREVA_PASS) {
-    return { name: TREVA_NAME, email: TREVA_EMAIL, role: 'superadmin', memberId: '' };
-  }
-  const u = LOCAL_USERS.find(u => u.email.toLowerCase() === e && u.pass === password);
-  return u ? { name: u.name, email: u.email, role: u.role, memberId: u.memberId || '' } : null;
-}
-
-export function loginByMemberId(memberId, password) {
-  const u = LOCAL_USERS.find(u => u.memberId === memberId.trim() && u.pass === password);
-  return u ? { name: u.name, email: u.email, role: u.role, memberId: u.memberId } : null;
+  if (!profile) return null;
+  return {
+    id:       data.user.id,
+    name:     profile.name,
+    email:    e,
+    role:     profile.role,
+    memberId: profile.member_id || '',
+  };
 }
 
 // ============================================================
 // LOGOUT
 // ============================================================
 export async function logoutAsync() {
-  if (isSupabaseReady) {
-    await supabase.auth.signOut();
-  }
+  await supabase.auth.signOut();
 }
 
 // ============================================================
-// CREATE PORTAL USER (Supabase Admin or local)
+// PORTAL USERS — read from Supabase
+// ============================================================
+export async function loadPortalUsersAsync() {
+  const { data, error } = await supabase
+    .from('users')
+    .select('id, name, email, role, member_id');
+  if (error) { console.error('loadPortalUsers:', error); return []; }
+  return (data || []).map(u => ({
+    id:       u.id,
+    name:     u.name,
+    email:    u.email,
+    role:     u.role,
+    memberId: u.member_id || '',
+  }));
+}
+
+// ============================================================
+// CREATE USER — Supabase Auth signUp + users table insert
 // ============================================================
 export async function createSupabaseUser(user) {
-  if (!isSupabaseReady) {
-    addPortalUser(user);
-    return { ok: true };
-  }
-  // Invite / create user via Supabase Auth (uses admin API — requires service role key)
-  // For now, store in local table only; Supabase Auth user creation done in Supabase dashboard
-  const { error } = await supabase.from('users').upsert({
-    id: user.supabaseId || undefined,
-    name: user.name,
-    email: user.email,
-    role: user.role,
+  // 1. Create auth user
+  const { data, error: authErr } = await supabase.auth.signUp({
+    email:    user.email,
+    password: user.pass,
+  });
+  if (authErr) return { ok: false, error: authErr };
+
+  const uid = data.user?.id;
+  if (!uid) return { ok: false, error: new Error('No user ID returned') };
+
+  // 2. Insert profile row
+  const { error: dbErr } = await supabase.from('users').insert({
+    id:        uid,
+    name:      user.name,
+    email:     user.email,
+    role:      user.role,
     member_id: user.memberId || null,
   });
-  if (error) {
-    console.error('Supabase upsert error:', error);
-    addPortalUser(user); // fallback to local
-  }
-  return { ok: !error, error };
+  if (dbErr) return { ok: false, error: dbErr };
+
+  return { ok: true, id: uid };
 }
 
 // ============================================================
-// SESSION — sessionStorage (works with both modes)
+// REMOVE USER — delete from users table (auth user stays but
+// cannot log in without a profile row)
+// ============================================================
+export async function removeSupabaseUser(email) {
+  const { error } = await supabase
+    .from('users')
+    .delete()
+    .eq('email', email);
+  if (error) console.error('removeSupabaseUser:', error);
+  return { ok: !error };
+}
+
+// ============================================================
+// UPDATE ROLE
+// ============================================================
+export async function updateSupabaseUserRole(email, newRole) {
+  const { error } = await supabase
+    .from('users')
+    .update({ role: newRole })
+    .eq('email', email);
+  if (error) console.error('updateSupabaseUserRole:', error);
+  return { ok: !error };
+}
+
+// ============================================================
+// SESSION — sessionStorage
 // ============================================================
 const SESSION_KEY = 'attigupperwa_session';
 
@@ -142,3 +131,9 @@ export function loadSession() {
 export function clearSession() {
   sessionStorage.removeItem(SESSION_KEY);
 }
+
+// Legacy no-ops kept so any stray imports don't break at runtime
+export function loadPortalUsers() { return []; }
+export function getPortalUsers()  { return []; }
+export function addPortalUser()   {}
+export function removePortalUser(){}
