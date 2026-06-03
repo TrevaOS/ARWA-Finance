@@ -1,6 +1,6 @@
 import React from 'react';
 import logoSrc from '../assets/logo.png';
-import { loginByEmail, loginByMemberId, saveSession } from '../auth.js';
+import { loginByEmailAsync, loginByMemberId, saveSession } from '../auth.js';
 import { Icon } from '../ui/components.jsx';
 
 export function LoginPage({ onLogin }) {
@@ -10,17 +10,29 @@ export function LoginPage({ onLogin }) {
   const [pass, setPass]         = React.useState('');
   const [showPass, setShowPass] = React.useState(false);
   const [error, setError]       = React.useState('');
+  const [loading, setLoading]   = React.useState(false);
 
   const reset = (m) => { setMode(m); setError(''); setPass(''); setEmail(''); setMemberId(''); };
 
-  const handleLogin = (e) => {
+  const handleLogin = async (e) => {
     e.preventDefault();
-    const user = mode === 'email'
-      ? loginByEmail(email.trim(), pass)
-      : loginByMemberId(memberId.trim(), pass);
-    if (!user) { setError('Invalid credentials. Please check and try again.'); return; }
-    saveSession(user);
-    onLogin(user);
+    setLoading(true);
+    setError('');
+    try {
+      let user;
+      if (mode === 'email') {
+        user = await loginByEmailAsync(email.trim(), pass);
+      } else {
+        user = loginByMemberId(memberId.trim(), pass);
+      }
+      if (!user) { setError('Invalid credentials. Please check and try again.'); return; }
+      saveSession(user);
+      onLogin(user);
+    } catch (err) {
+      setError('Sign in failed. Please try again.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
