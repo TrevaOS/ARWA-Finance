@@ -318,6 +318,13 @@ function App() {
     flash('Member status updated', 'success', 'check');
   };
 
+  const onUpdateMemberPayment = (memberId, paymentInfo) => {
+    setMembers((prev) => prev.map((m) => m.id === memberId ? { ...m, paymentSubmitted: true, pendingPayment: paymentInfo } : m));
+    log('member_status', `Member ${memberId} submitted payment — Txn: ${paymentInfo.txnId}`);
+    notify(`Payment submitted by ${members.find(m=>m.id===memberId)?.name} — Txn: ${paymentInfo.txnId}`, 'info', 'rupee');
+    flash('Payment submitted for committee review', 'success', 'check');
+  };
+
   // Unique roles — only one person can hold each
   const UNIQUE_ROLES = ['President', 'Vice President', 'Secretary', 'Joint Secretary', 'Treasurer'];
 
@@ -624,6 +631,7 @@ function App() {
               onAddMember={onAddMember}
               onUpdateMemberStatus={onUpdateMemberStatus}
               onUpdateMemberRole={onUpdateMemberRole}
+              onUpdateMemberPayment={onUpdateMemberPayment}
               onExportMembersPdf={() => setOpenExportDialog('members')}
             />
           )}

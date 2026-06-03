@@ -32,12 +32,13 @@ function EndDateCell({ member }) {
 const UNIQUE_ROLES_LIST = ['President', 'Vice President', 'Secretary', 'Joint Secretary', 'Treasurer'];
 const ALL_ROLES_LIST = [...UNIQUE_ROLES_LIST, 'Member'];
 
-export function MembersView({ members, onAddMember, onUpdateMemberStatus, onExportMembersPdf, role, onUpdateMemberRole }) {
+export function MembersView({ members, onAddMember, onUpdateMemberStatus, onExportMembersPdf, role, onUpdateMemberRole, onUpdateMemberPayment }) {
   const [showOnboard, setShowOnboard] = React.useState(false);
   const [screen, setScreen] = React.useState('all');
   const [filterType, setFilterType] = React.useState('all');
   const [search, setSearch] = React.useState('');
   const [editRoleId, setEditRoleId] = React.useState(null);
+  const [detailMember, setDetailMember] = React.useState(null);
 
   const canAddMember = role === 'president' || role === 'vice_president';
   const canEditRoles = role === 'president' || role === 'vice_president';
@@ -156,7 +157,7 @@ export function MembersView({ members, onAddMember, onUpdateMemberStatus, onExpo
             <div className="empty-title">No members found</div>
           </div>
         ) : shown.map((m) => (
-          <div className="mt-row" key={m.id} style={{gridTemplateColumns: canEditRoles ? '0.55fr 1.8fr 0.6fr 0.65fr 1fr 0.85fr 0.9fr 0.75fr' : '0.55fr 1.8fr 0.6fr 0.65fr 0.85fr 0.9fr 0.75fr'}}>
+          <div className="mt-row" key={m.id} onClick={() => setDetailMember(m)} style={{gridTemplateColumns: canEditRoles ? '0.55fr 1.8fr 0.6fr 0.65fr 1fr 0.85fr 0.9fr 0.75fr' : '0.55fr 1.8fr 0.6fr 0.65fr 0.85fr 0.9fr 0.75fr', cursor: 'pointer'}}>
             <span style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--green)', fontVariantNumeric: 'tabular-nums', letterSpacing: '.01em' }}>{m.id}</span>
             <div className="mt-member">
               <Avatar name={m.name} size={34} />
@@ -200,6 +201,15 @@ export function MembersView({ members, onAddMember, onUpdateMemberStatus, onExpo
       </div>
 
       <MemberOnboardForm open={showOnboard} onClose={() => setShowOnboard(false)} onSubmit={onAddMember} />
+      {detailMember && (
+        <MemberDetailModal
+          member={members.find(m => m.id === detailMember.id) || detailMember}
+          canApprove={canAddMember}
+          onClose={() => setDetailMember(null)}
+          onUpdateStatus={onUpdateMemberStatus}
+          onUpdatePayment={onUpdateMemberPayment}
+        />
+      )}
     </div>
   );
 }
@@ -258,5 +268,177 @@ function MemberOnboardForm({ open, onClose, onSubmit }) {
         </Field>
       </div>
     </Modal>
+  );
+}
+
+// ─── Member Detail Modal ───────────────────────────────────────────────────
+const UPI_VPA = 'attigupperwa@upi';
+const ANNUAL_AMT = 500;
+const LIFETIME_AMT = 5000;
+
+function MemberDetailModal({ member, canApprove, onClose, onUpdateStatus, onUpdatePayment }) {
+  const [txnId, setTxnId]     = React.useState('');
+  const [ssFile, setSsFile]   = React.useState(null);
+  const [ssUrl, setSsUrl]     = React.useState(null);
+  const [submitting, setSubmitting] = React.useState(false);
+  const [submitted, setSubmitted]   = React.useState(false);
+
+  const amt = member.type === 'lifetime' ? LIFETIME_AMT : ANNUAL_AMT;
+  const isPaid = member.status === 'paid';
+
+  const handleSs = (file) => {
+    setSsFile(file);
+    setSsUrl(file ? URL.createObjectURL(file) : null);
+  };
+
+  const handleSubmitPayment = () => {
+    setSubmitting(true);
+    // In production this would upload ssFile to Supabase Storage and save txnId
+    setTimeout(() => {
+      onUpdatePayment && onUpdatePayment(member.id, { txnId, ssUrl, date: new Date().toISOString().slice(0,10) });
+      setSubmitting(false);
+      setSubmitted(true);
+    }, 600);
+  };
+
+  const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const end = computeEndDate(member);
+  const endStr = end ? (end.getDate() + ' ' + MONTHS[end.getMonth()] + ' ' + end.getFullYear()) : null;
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal modal-wide" onClick={e => e.stopPropagation()} style={{ maxWidth: 620 }}>
+        {/* Header */}
+        <div className="modal-head">
+          <div style={{ display: 'flex', gap: 14, alignItems: 'center' }}>
+            <Avatar name={member.name} size={46} />
+            <div>
+              <h2 style={{ fontSize: 20, margin: 0 }}>{member.name}</h2>
+              <div style={{ fontSize: 13, color: 'var(--ink-3)', marginTop: 2 }}>
+                {member.id} · Flat {member.flat} · {member.phone}
+              </div>
+            </div>
+          </div>
+          <button className="icon-btn" onClick={onClose}><Icon name="x" size={20} /></button>
+        </div>
+
+        <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+          {/* Status row */}
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+            <Badge tone={isPaid ? 'success' : member.status === 'overdue' ? 'danger' : 'amber'}>
+              {isPaid ? 'Paid' : member.status === 'overdue' ? 'Overdue' : member.status === 'pending' ? 'Pending payment' : 'Due'}
+            </Badge>
+            <span style={{ fontSize: 12, color: 'var(--ink-3)' }}>
+              {member.type === 'lifetime' ? 'Lifetime member' : 'Annual member'}
+            </span>
+            {endStr && !isPaid && (
+              <span style={{ fontSize: 12, color: 'var(--ink-3)' }}>· Joined {member.joined || member.since}</span>
+            )}
+            {endStr && isPaid && (
+              <span style={{ fontSize: 12, color: 'var(--ink-3)' }}>· Valid until {endStr}</span>
+            )}
+          </div>
+
+          {/* Payment section */}
+          {!isPaid && !submitted && (
+            <div style={{ background: 'var(--paper)', border: '1px solid var(--line)', borderRadius: 14, padding: 18 }}>
+              <div className="kicker" style={{ marginBottom: 10 }}>Pay membership fee</div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 18, alignItems: 'start' }}>
+                {/* QR code */}
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, background: '#fff', border: '1px solid var(--line)', borderRadius: 12, padding: 16, textAlign: 'center' }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.06em', color: 'var(--terra)' }}>Scan & Pay</div>
+                  {/* Demo QR pattern */}
+                  <svg width="120" height="120" viewBox="0 0 21 21" style={{ imageRendering: 'pixelated', borderRadius: 6 }}>
+                    <rect width="21" height="21" fill="white"/>
+                    {/* Finder patterns */}
+                    <rect x="0" y="0" width="7" height="7" fill="#1B2420"/><rect x="1" y="1" width="5" height="5" fill="white"/><rect x="2" y="2" width="3" height="3" fill="#1B2420"/>
+                    <rect x="14" y="0" width="7" height="7" fill="#1B2420"/><rect x="15" y="1" width="5" height="5" fill="white"/><rect x="16" y="2" width="3" height="3" fill="#1B2420"/>
+                    <rect x="0" y="14" width="7" height="7" fill="#1B2420"/><rect x="1" y="15" width="5" height="5" fill="white"/><rect x="2" y="16" width="3" height="3" fill="#1B2420"/>
+                    {/* Data modules */}
+                    {[8,10,12,9,11,13].map(x => [8,9,10,11,12,13].map(y => (x+y)%3===0 && <rect key={x+'-'+y} x={x} y={y} width="1" height="1" fill="#1B2420"/>))}
+                    <rect x="8" y="14" width="2" height="1" fill="#1B2420"/>
+                    <rect x="11" y="15" width="1" height="2" fill="#1B2420"/>
+                    <rect x="13" y="16" width="2" height="1" fill="#1B2420"/>
+                    <rect x="9" y="17" width="3" height="1" fill="#1B2420"/>
+                    <rect x="14" y="9" width="1" height="2" fill="#1B2420"/>
+                    <rect x="16" y="10" width="2" height="1" fill="#1B2420"/>
+                    <rect x="18" y="9" width="1" height="3" fill="#1B2420"/>
+                    <rect x="14" y="13" width="3" height="1" fill="#1B2420"/>
+                    <rect x="18" y="12" width="1" height="2" fill="#1B2420"/>
+                  </svg>
+                  <div style={{ fontWeight: 700, fontSize: 13, color: 'var(--ink)' }}>₹{amt.toLocaleString('en-IN')}</div>
+                  <div style={{ fontSize: 11.5, color: 'var(--green)', fontWeight: 600 }}>{UPI_VPA}</div>
+                  <div style={{ fontSize: 11, color: 'var(--ink-3)', lineHeight: 1.4 }}>
+                    Attiguppe RWA<br/>Use UPI · IMPS · NEFT
+                  </div>
+                </div>
+
+                {/* Transaction details */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                  <Field label="Transaction ID" hint="UPI ref / UTR / NEFT ref">
+                    <TextInput
+                      value={txnId}
+                      onChange={e => setTxnId(e.target.value)}
+                      placeholder="e.g. 423XXXXXXX"
+                    />
+                  </Field>
+                  <Field label="Payment screenshot">
+                    <FileDrop
+                      label={ssFile ? ssFile.name : 'Upload screenshot'}
+                      filename={ssFile?.name}
+                      onUpload={handleSs}
+                    />
+                  </Field>
+                  {ssUrl && (
+                    <img src={ssUrl} alt="Payment screenshot" style={{ width: '100%', borderRadius: 8, border: '1px solid var(--line)', maxHeight: 120, objectFit: 'cover' }} />
+                  )}
+                  <Button
+                    variant="primary"
+                    icon="check"
+                    disabled={!txnId.trim() || submitting}
+                    onClick={handleSubmitPayment}
+                  >
+                    {submitting ? 'Submitting…' : 'Submit payment'}
+                  </Button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Submitted confirmation */}
+          {submitted && (
+            <div style={{ background: 'var(--success-bg)', border: '1px solid #b2d8be', borderRadius: 12, padding: 16, display: 'flex', gap: 10, alignItems: 'center' }}>
+              <Icon name="check" size={18} style={{ color: 'var(--success)', flexShrink: 0 }} />
+              <div>
+                <div style={{ fontWeight: 700, fontSize: 14, color: 'var(--success)' }}>Payment submitted for review</div>
+                <div style={{ fontSize: 12, color: 'var(--ink-3)', marginTop: 2 }}>Txn ID: {txnId} · Committee will verify and update your status.</div>
+              </div>
+            </div>
+          )}
+
+          {/* Already paid */}
+          {isPaid && (
+            <div style={{ background: 'var(--success-bg)', border: '1px solid #b2d8be', borderRadius: 12, padding: 16, display: 'flex', gap: 10, alignItems: 'center' }}>
+              <Icon name="check" size={18} style={{ color: 'var(--success)', flexShrink: 0 }} />
+              <div>
+                <div style={{ fontWeight: 700, fontSize: 14, color: 'var(--success)' }}>Membership active</div>
+                {member.renewalTxn?.txnRef && (
+                  <div style={{ fontSize: 12, color: 'var(--ink-3)', marginTop: 2 }}>Txn ref: {member.renewalTxn.txnRef}</div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Admin approve/reject strip */}
+          {canApprove && !isPaid && (member.status === 'pending' || member.paymentSubmitted) && (
+            <div style={{ display: 'flex', gap: 10, alignItems: 'center', paddingTop: 4 }}>
+              <span style={{ fontSize: 13, color: 'var(--ink-3)', marginRight: 'auto' }}>Committee action:</span>
+              <Button size="sm" variant="primary" icon="check" onClick={() => { onUpdateStatus(member.id, 'paid'); onClose(); }}>Mark paid</Button>
+              <Button size="sm" variant="soft-danger" icon="x" onClick={() => { onUpdateStatus(member.id, 'due'); onClose(); }}>Mark due</Button>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
   );
 }
