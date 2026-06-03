@@ -61,30 +61,30 @@ export async function loadPortalUsersAsync() {
 }
 
 // ============================================================
-// CREATE USER — Supabase Auth signUp + users table insert
+// CREATE USER — via Edge Function (uses service role key server-side)
 // ============================================================
 export async function createSupabaseUser(user) {
-  // 1. Create auth user
-  const { data, error: authErr } = await supabase.auth.signUp({
-    email:    user.email,
-    password: user.pass,
+  const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+  const secret      = import.meta.env.VITE_FUNCTION_SECRET;
+
+  const res = await fetch(`${supabaseUrl}/functions/v1/create-user`, {
+    method:  'POST',
+    headers: {
+      'Content-Type':  'application/json',
+      'Authorization': `Bearer ${secret}`,
+    },
+    body: JSON.stringify({
+      name:     user.name,
+      email:    user.email,
+      password: user.pass,
+      role:     user.role,
+      memberId: user.memberId || '',
+    }),
   });
-  if (authErr) return { ok: false, error: authErr };
 
-  const uid = data.user?.id;
-  if (!uid) return { ok: false, error: new Error('No user ID returned') };
-
-  // 2. Insert profile row
-  const { error: dbErr } = await supabase.from('users').insert({
-    id:        uid,
-    name:      user.name,
-    email:     user.email,
-    role:      user.role,
-    member_id: user.memberId || null,
-  });
-  if (dbErr) return { ok: false, error: dbErr };
-
-  return { ok: true, id: uid };
+  const json = await res.json();
+  if (!res.ok || json.error) return { ok: false, error: new Error(json.error || 'Failed') };
+  return { ok: true, id: json.id };
 }
 
 // ============================================================
